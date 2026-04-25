@@ -739,6 +739,7 @@ private:
             }
 
             auto cparams = common_context_params_to_llama(params_dft);
+            cparams.n_rollback_max = 0;
             ctx_dft.reset(llama_init_from_model(model_dft.get(), cparams));
 
             ctx_dft_seq_rm_type = common_context_can_seq_rm(ctx_dft.get());
