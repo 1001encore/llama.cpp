@@ -476,11 +476,22 @@ ggml_tensor * llama_model_qwen35moe::graph::build_layer_attn_linear(
                     ggml_view_2d(ctx0, ssm_states_all, hparams.n_embd_s(), n_seqs, ssm_states_all->nb[1],
                         kv_head * hparams.n_embd_s() * ggml_element_size(ssm_states_all))));
     } else {
-        ggml_tensor * gdn_out = build_delta_net_fused_keep_intermediates(
-            q_conv, k_conv, v_conv, gate, beta, state, il);
-
+        // Build a 3D (D, K, n_seqs) state: slot 0 carries the initial state; trailing slots
+        // signal K. K is cparams-driven (static across batches).
         const int64_t S_v = head_v_dim;
         const int64_t H_v = num_v_heads;
+        const int64_t D   = S_v * S_v * H_v;
+        const int64_t K   = (int64_t) cparams.n_rs_seq;
+
+        ggml_tensor * state_3d = ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, D, K, n_seqs);
+        ggml_tensor * slot_0   = ggml_view_2d(ctx0, state_3d, D, n_seqs,
+                                              state_3d->nb[2],   // jump to next seq across K slots
+                                              0);                // start at slot 0
+        ggml_tensor * state_in_2d = ggml_reshape_2d(ctx0, state, D, n_seqs);
+        ggml_build_forward_expand(gf, ggml_cpy(ctx0, state_in_2d, slot_0));
+
+        ggml_tensor * gdn_out = ggml_gated_delta_net(ctx0, q_conv, k_conv, v_conv, gate, beta, state_3d);
+        cb(gdn_out, LLAMA_TENSOR_NAME_FGDN_CH, il);
 
         const int64_t attn_score_elems    = S_v * H_v * n_seq_tokens * n_seqs;
         const int64_t state_size_per_snap = S_v * S_v * H_v * n_seqs;
@@ -493,18 +504,20 @@ ggml_tensor * llama_model_qwen35moe::graph::build_layer_attn_linear(
             0);
         cb(output, "attn_output", il);
 
+        // Output's snapshot region carries K slots; slot k = state from (K-1-k) tokens ago.
+        // Map output slot k → cache slot (K-1-k): newest state at cache slot 0.
         const size_t row_size = hparams.n_embd_s() * ggml_element_size(ssm_states_all);
-        for (int64_t t = 1; t <= n_seq_tokens; ++t) {
-            const uint32_t slot = (uint32_t)(n_seq_tokens - t);
+        for (int64_t k = 0; k < K; ++k) {
+            const uint32_t cache_slot = (uint32_t) (K - 1 - k);
             ggml_tensor * src = ggml_view_4d(ctx0, gdn_out,
                 S_v, S_v, H_v, n_seqs,
                 ggml_row_size(gdn_out->type, S_v),
                 ggml_row_size(gdn_out->type, S_v * S_v),
                 ggml_row_size(gdn_out->type, S_v * S_v * H_v),
-                ggml_row_size(gdn_out->type, attn_score_elems + (t - 1) * state_size_per_snap));
+                ggml_row_size(gdn_out->type, attn_score_elems + k * state_size_per_snap));
             ggml_tensor * dst = ggml_view_2d(ctx0, ssm_states_all,
                 hparams.n_embd_s(), n_seqs, ssm_states_all->nb[1],
-                ((size_t) slot * mem_size + kv_head) * row_size);
+                ((size_t) cache_slot * mem_size + kv_head) * row_size);
             ggml_build_forward_expand(gf, ggml_cpy(ctx0, src, dst));
         }
     }
