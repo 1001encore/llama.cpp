@@ -5,21 +5,19 @@ on:
 
 jobs:
   windows-cuda-mtp:
-    runs-on: windows-2025
+    runs-on: windows-2022
     
-    env:
-      CUDA_VERSION: "13.1.0"
-
     steps:
-      - name: Clone
+      - name: Force Clone MTP Branch
         uses: actions/checkout@v4
         with:
+          ref: mtp-clean
           submodules: recursive
 
-      - name: Install CUDA
-        uses: jimmy-park/setup-cuda@v1
+      - name: Install CUDA 13.1
+        uses: Jimver/cuda-toolkit@v0.2.18
         with:
-          cuda: ${{ env.CUDA_VERSION }}
+          cuda: '13.1.0'
 
       - name: Install Ninja
         run: choco install ninja
