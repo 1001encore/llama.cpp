@@ -14,6 +14,9 @@ jobs:
           ref: mtp-clean
           submodules: recursive
 
+      - name: Setup MSVC (The Fix)
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Install CUDA 13.1
         uses: Jimver/cuda-toolkit@v0.2.30
         with:
@@ -26,6 +29,8 @@ jobs:
         run: |
           cmake -S . -B build `
             -G "Ninja" `
+            -D CMAKE_C_COMPILER=cl `
+            -D CMAKE_CXX_COMPILER=cl `
             -D GGML_CUDA=ON `
             -D LLAMA_BUILD_SERVER=ON `
             -D CMAKE_BUILD_TYPE=Release `
