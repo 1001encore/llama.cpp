@@ -1,0 +1,43 @@
+name: Sniper-MTP-Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows-cuda-mtp:
+    runs-on: windows-2025
+    
+    env:
+      CUDA_VERSION: "13.1.0"
+
+    steps:
+      - name: Clone
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install CUDA
+        uses: jimmy-park/setup-cuda@v1
+        with:
+          cuda: ${{ env.CUDA_VERSION }}
+
+      - name: Install Ninja
+        run: choco install ninja
+
+      - name: Build MTP Server
+        run: |
+          cmake -S . -B build `
+            -G "Ninja" `
+            -D GGML_CUDA=ON `
+            -D LLAMA_BUILD_SERVER=ON `
+            -D CMAKE_BUILD_TYPE=Release `
+            -D GGML_CUDA_F16=ON
+          cmake --build build --config Release -j $env:NUMBER_OF_PROCESSORS
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-mtp-win-cuda13.1
+          path: |
+            build/bin/Release/llama-server.exe
+            build/bin/Release/*.dll
